@@ -12,9 +12,6 @@ let
   };
 in
 {
-  agentsInstructions.materializePath = ".codex/config.toml";
-  agentsInstructions.materializeTemplate = "codexConfigToml";
-
   agentsInstructions.ownFragments.committer = [ committerAgentsText ];
   agentsInstructions.mergedFragments = lib.mkAfter [ committerAgentsText ];
 
