@@ -3,17 +3,18 @@
     "agents-instructions-builder": {
       "flake": false,
       "locked": {
-        "lastModified": 1772873821,
-        "narHash": "sha256-015+vTuVFc/oPPEpHBcoLg4gBgVMTb6QsMaPiNZSt98=",
-        "owner": "Alb-O",
-        "repo": "agents-instructions-builder",
-        "rev": "8ddcba033fdae3c80ade5780b2333089fab83dbd",
-        "type": "github"
+        "lastModified": 1772880157,
+        "narHash": "sha256-WjbImIV7fpIldyhI1HBinzYVP9p59f7818kKozkTmHw=",
+        "ref": "main",
+        "rev": "c5bdf79aab76063fd4569a96b43059250ba8c17c",
+        "revCount": 2,
+        "type": "git",
+        "url": "https://github.com/Alb-O/agents-instructions-builder.git"
       },
       "original": {
-        "owner": "Alb-O",
-        "repo": "agents-instructions-builder",
-        "type": "github"
+        "ref": "main",
+        "type": "git",
+        "url": "https://github.com/Alb-O/agents-instructions-builder.git"
       }
     },
     "devenv": {
