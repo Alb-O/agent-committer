@@ -17,6 +17,9 @@ if ! git -C "$repo_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 2
 fi
 
+repo_root=$(git -C "$repo_path" rev-parse --show-toplevel)
+pre_commit_config="$repo_root/.pre-commit-config.yaml"
+
 files=()
 add_files=()
 for pattern in "$@"; do
@@ -76,16 +79,15 @@ done < <(
   git -C "$repo_path" diff --cached --name-only --diff-filter=ACMRTUXB -- "${files[@]}"
 )
 
-# `git commit --only` runs hooks against a locked temporary next-index, which
-# breaks fixup-style hooks that restage files (for example treefmt wrappers that
-# call `git add`). Run pre-commit eagerly against the selected staged files, let
-# those hooks update the real index, then disable hook re-entry for the actual
-# commit step.
-if ((${#hook_files[@]} > 0)); then
+run_pre_commit_hooks() {
+  if [[ ! -f "$pre_commit_config" ]]; then
+    return 0
+  fi
+
   if command -v prek >/dev/null 2>&1; then
     (
       cd "$repo_path"
-      prek run --stage pre-commit --files "${hook_files[@]}"
+      prek run --color always --stage pre-commit --files "${hook_files[@]}"
     )
   elif command -v pre-commit >/dev/null 2>&1; then
     (
@@ -96,6 +98,57 @@ if ((${#hook_files[@]} > 0)); then
     echo $'error: neither `prek` nor `pre-commit` is available on PATH' >&2
     exit 1
   fi
+}
+
+snapshot_selected_state() {
+  local prefix=$1
+  git -C "$repo_path" diff --binary -- "${files[@]}" >"${prefix}.worktree"
+  git -C "$repo_path" diff --binary --cached -- "${files[@]}" >"${prefix}.index"
+}
+
+# `git commit --only` runs hooks against a locked temporary next-index, which
+# breaks fixup-style hooks that restage files (for example treefmt wrappers that
+# call `git add`). Run pre-commit eagerly against the selected staged files, let
+# those hooks update the real index, then disable hook re-entry for the actual
+# commit step.
+if ((${#hook_files[@]} > 0)); then
+  hook_tmpdir=$(mktemp -d)
+  trap 'rm -rf "$hook_tmpdir"' EXIT
+
+  attempt=0
+  max_attempts=5
+  while true; do
+    attempt=$((attempt + 1))
+    hook_log="$hook_tmpdir/hook-${attempt}.log"
+    snapshot_selected_state "$hook_tmpdir/before"
+
+    set +e
+    run_pre_commit_hooks >"$hook_log" 2>&1
+    rc=$?
+    set -e
+
+    if ((rc == 0)); then
+      cat "$hook_log"
+      break
+    fi
+
+    if ((${#add_files[@]} > 0)); then
+      git -C "$repo_path" add -A -- "${add_files[@]}"
+    fi
+
+    snapshot_selected_state "$hook_tmpdir/after"
+    if cmp -s "$hook_tmpdir/before.worktree" "$hook_tmpdir/after.worktree" &&
+      cmp -s "$hook_tmpdir/before.index" "$hook_tmpdir/after.index"; then
+      cat "$hook_log" >&2
+      exit "$rc"
+    fi
+
+    if ((attempt >= max_attempts)); then
+      cat "$hook_log" >&2
+      echo "error: pre-commit hooks kept modifying selected files after ${max_attempts} attempts" >&2
+      exit "$rc"
+    fi
+  done
 fi
 
 git -C "$repo_path" commit --only --no-verify -m "$msg" -- "${files[@]}"
