@@ -21,7 +21,8 @@ repo_root=$(git -C "$repo_path" rev-parse --show-toplevel)
 pre_commit_config="$repo_root/.pre-commit-config.yaml"
 
 files=()
-add_files=()
+initial_add_files=()
+retry_add_files=()
 for pattern in "$@"; do
   # Normalize shell globs into git pathspec globs so the same selection logic
   # works whether the caller passes a literal file or a pattern.
@@ -38,7 +39,8 @@ for pattern in "$@"; do
   fi
   if [[ -e "$pattern_in_repo" ]]; then
     files+=("$pathspec")
-    add_files+=("$pathspec")
+    initial_add_files+=("$pathspec")
+    retry_add_files+=("$pathspec")
     continue
   fi
 
@@ -46,15 +48,21 @@ for pattern in "$@"; do
   # glob pathspec so `git add -A` can stage them.
   if git -C "$repo_path" ls-files --others --exclude-standard -- "$pathspec" | grep -q .; then
     files+=("$pathspec")
-    add_files+=("$pathspec")
+    initial_add_files+=("$pathspec")
+    retry_add_files+=("$pathspec")
     continue
   fi
 
   # Deleted tracked paths are valid selections too; `git ls-files` lets the
   # caller target them even though the path no longer exists on disk.
+  #
+  # Stage them once up front, but do not include them in later retry restages.
+  # After the first `git add -A`, Git no longer treats the missing literal
+  # pathspec as matchable, so replaying it during hook-retry loops would fail
+  # with "pathspec did not match any files".
   if git -C "$repo_path" ls-files --error-unmatch -- "$pathspec" >/dev/null 2>&1; then
     files+=("$pathspec")
-    add_files+=("$pathspec")
+    initial_add_files+=("$pathspec")
     continue
   fi
 
@@ -74,10 +82,11 @@ if ((${#files[@]} == 0)); then
   exit 1
 fi
 
-# Only restage selections that still resolve in the worktree or index; staged-
-# only deletions were already captured above and would make `git add -A` fail.
-if ((${#add_files[@]} > 0)); then
-  git -C "$repo_path" add -A -- "${add_files[@]}"
+# Only restage selections that still resolve in the worktree or the first add
+# pass. Staged-only deletions were already captured above and would make repeat
+# `git add -A` calls fail.
+if ((${#initial_add_files[@]} > 0)); then
+  git -C "$repo_path" add -A -- "${initial_add_files[@]}"
 fi
 
 hook_files=()
@@ -140,8 +149,8 @@ if ((${#hook_files[@]} > 0)); then
       break
     fi
 
-    if ((${#add_files[@]} > 0)); then
-      git -C "$repo_path" add -A -- "${add_files[@]}"
+    if ((${#retry_add_files[@]} > 0)); then
+      git -C "$repo_path" add -A -- "${retry_add_files[@]}"
     fi
 
     snapshot_selected_state "$hook_tmpdir/after"
